@@ -2,29 +2,27 @@ use etherparse::icmpv4::TimeExceededCode;
 use etherparse::NetSlice::Ipv4;
 use etherparse::{Icmpv4Type, PacketBuilder, SlicedPacket, TransportSlice};
 use std::io::{Read, Write};
+use std::ops::Add;
+use std::time::{Duration, Instant};
+use tun::platform::Device;
 use TransportSlice::Icmpv4;
 
+struct DelayedPacket {
+    target_time: Instant,
+    payload: Vec<u8>,
+}
+
 fn main() {
-    let mut config = tun::Configuration::default();
-    config
-        .address((169, 254, 0, 1))
-        .netmask((255, 255, 255, 0))
-        .up();
-
-    config.platform(|config| {
-        config.packet_information(true);
-    });
-
-    let mut dev = tun::create(&config).unwrap();
+    let mut dev = open_tun();
     let mut buf = [0; 4096];
+    let mut packet_queue: Vec<DelayedPacket> = Vec::new();
+    let mut target_latency = 0u64;
 
     loop {
         let amount = dev.read(&mut buf).unwrap();
         let slice = &buf[4..amount];
-        //println!("{:?}", slice);
 
         let packet = SlicedPacket::from_ip(slice);
-        //println!("{:#?}", &packet);
 
         if let Ok(SlicedPacket {
             net: Some(Ipv4(ip)),
@@ -63,8 +61,39 @@ fn main() {
                     result
                 };
 
-                dev.write_all(&result).unwrap();
+                target_latency = (target_latency + 1) % 7;
+                packet_queue.push(DelayedPacket {
+                    target_time: Instant::now().add(Duration::from_millis(target_latency)),
+                    payload: result,
+                });
             }
         }
+
+        let mut new_queue: Vec<DelayedPacket> = Vec::with_capacity(packet_queue.len());
+        let now = Instant::now();
+        for packet in packet_queue {
+            if now > packet.target_time {
+                dev.write_all(&packet.payload).unwrap();
+            } else {
+                new_queue.push(packet)
+            }
+        }
+
+        packet_queue = new_queue;
     }
+}
+
+fn open_tun() -> Device {
+    let mut config = tun::Configuration::default();
+    config
+        .address((169, 254, 0, 1))
+        .netmask((255, 255, 255, 0))
+        .up();
+
+    config.platform(|config| {
+        config.packet_information(true);
+    });
+
+    let mut dev = tun::create(&config).unwrap();
+    dev
 }
