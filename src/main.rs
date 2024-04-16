@@ -39,7 +39,7 @@ fn main() {
         [0, 0, 3, 3, 0, 0, 3, 3, 0, 0, 2, 2, 2, 2, 2, 2, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 4, 4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0],
     ];
     
-    let pattern = pattern2;
+    let pattern = pattern1;
 
     let mut row_pointer = [0u8; 10];
 
