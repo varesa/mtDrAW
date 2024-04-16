@@ -13,6 +13,21 @@ struct DelayedPacket {
 }
 
 fn main() {
+    let pattern = [
+        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        [0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+        [0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        [0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0],
+    ];
+
+    let mut row_pointer = [0u8; 10];
+
     let mut dev = open_tun();
     let mut buf = [0; 4096];
     let mut packet_queue: Vec<DelayedPacket> = Vec::new();
@@ -33,7 +48,11 @@ fn main() {
             if let Icmpv4Type::EchoRequest(echo_request) = &icmp.icmp_type() {
                 let ttl = ip.header().ttl();
 
-                let result = if ttl < 10 {
+                let row = std::cmp::min(ttl - 1, 9) as usize;
+                //let row = 0usize;
+                println!("{}", row);
+
+                if ttl < 11 {
                     let mut new_source = ip.header().destination();
                     new_source[3] = ttl + 1;
                     let new_destination = ip.header().source();
@@ -46,7 +65,15 @@ fn main() {
                     result.write_all(&buf[0..4]).unwrap();
                     new_packet.write(&mut result, &buf[4..32]).unwrap();
 
-                    result
+                    let column = row_pointer[row] as usize;
+                    let delay = pattern[row][column];
+                    row_pointer[row] = (row_pointer[row] + 1) % pattern[0].len() as u8;
+
+                    //target_latency = (target_latency + 1) % 7;
+                    packet_queue.push(DelayedPacket {
+                        target_time: Instant::now().add(Duration::from_millis(delay)),
+                        payload: result,
+                    });
                 } else {
                     let new_source = ip.header().destination();
                     let new_destination = ip.header().source();
@@ -58,14 +85,16 @@ fn main() {
                     result.write_all(&buf[0..4]).unwrap();
                     new_packet.write(&mut result, &[]).unwrap();
 
-                    result
-                };
+                    let column = row_pointer[row] as usize;
+                    let delay = pattern[row][column];
+                    row_pointer[row] = (row_pointer[row] + 1) % pattern[0].len() as u8;
 
-                target_latency = (target_latency + 1) % 7;
-                packet_queue.push(DelayedPacket {
-                    target_time: Instant::now().add(Duration::from_millis(target_latency)),
-                    payload: result,
-                });
+                    //target_latency = (target_latency + 1) % 7;
+                    packet_queue.push(DelayedPacket {
+                        target_time: Instant::now().add(Duration::from_millis(0)),
+                        payload: result,
+                    });
+                };
             }
         }
 
@@ -94,6 +123,5 @@ fn open_tun() -> Device {
         config.packet_information(true);
     });
 
-    let mut dev = tun::create(&config).unwrap();
-    dev
+    tun::create(&config).unwrap()
 }
